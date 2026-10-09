@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ascent — Daily Market-Cap Climbers</title>
+  <meta name="description" content="Every day: Binance-listed coins worth $15M–$2B, ranked by how much their total value grew in the last 24 hours." />
+  <meta name="theme-color" content="#f4f2ec" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0c0c0b" media="(prefers-color-scheme: dark)" />
+  <meta property="og:title" content="Ascent — Daily Market-Cap Climbers" />
+  <meta property="og:description" content="Binance coins worth $15M–$2B, ranked daily by 24h market-cap growth." />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <script>
+    try { const t = localStorage.getItem("ascent-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
+</head>
+<body>
+  <a class="skip" href="#board">Skip to the full list</a>
+
+  <header class="top">
+    <div class="wrap top__inner">
+      <a class="brand" href="./" aria-label="Ascent home">
+        <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect x="3" y="20" width="6" height="9" rx="1.5" />
+          <rect x="13" y="13" width="6" height="16" rx="1.5" />
+          <rect x="23" y="4" width="6" height="25" rx="1.5" />
+        </svg>
+        <span class="brand__name">Ascent</span>
+        <span class="brand__tag">Daily market-cap climbers</span>
+      </a>
+      <div class="top__tools">
+        <label class="datepick">
+          <span class="sr">Choose a day</span>
+          <select id="dateSelect" aria-label="Choose a day"></select>
+        </label>
+        <button class="iconbtn" id="themeBtn" type="button" aria-label="Switch light or dark mode">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="sun" d="M12 4V2m0 20v-2m8-8h2M2 12h2m13.66-5.66 1.41-1.41M4.93 19.07l1.41-1.41m0-11.32L4.93 4.93m14.14 14.14-1.41-1.41M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z"/><path class="moon" d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="app" class="wrap" aria-busy="true">
+    <!-- Hero -->
+    <section class="hero" aria-labelledby="headline">
+      <div class="hero__copy">
+        <p class="eyebrow" id="eyebrow"><span class="pulse" aria-hidden="true"></span><span id="eyebrowText">Loading today's briefing…</span></p>
+        <h1 id="headline" class="headline"><span class="ph ph--xl"></span><span class="ph ph--lg"></span></h1>
+        <div id="briefing" class="briefing"><span class="ph"></span><span class="ph"></span></div>
+        <p id="freshness" class="freshness" hidden></p>
+      </div>
+      <aside class="mood card" aria-labelledby="moodTitle">
+        <h2 id="moodTitle" class="card__title">How the market did today</h2>
+        <p class="mood__big"><span id="moodPct">—</span><span class="mood__unit">of coins grew</span></p>
+        <div class="moodbar" id="moodBar" role="img" aria-label="Share of coins that grew, stayed flat, or shrank"></div>
+        <ul class="moodlegend" id="moodLegend"></ul>
+        <dl class="ministats" id="miniStats"></dl>
+      </aside>
+    </section>
+
+    <!-- Podium -->
+    <section class="section" aria-labelledby="podiumTitle">
+      <div class="section__head">
+        <h2 id="podiumTitle" class="section__title">The top three climbers</h2>
+        <p class="section__sub">Ranked by how much their total value grew in percent in the last 24 hours.</p>
+      </div>
+      <div class="podium" id="podium"></div>
+    </section>
+
+    <!-- Plain-words explainer -->
+    <section class="explain" aria-labelledby="explainTitle">
+      <h2 id="explainTitle" class="explain__title">How this works, in plain words</h2>
+      <ol class="steps">
+        <li><span class="steps__n">1</span><div><strong>We look at every coin on Binance,</strong> the world's largest crypto exchange.</div></li>
+        <li><span class="steps__n">2</span><div><strong>We keep the mid-sized ones,</strong> coins whose total value is between $15 million and $2 billion.</div></li>
+        <li><span class="steps__n">3</span><div><strong>We rank them by growth in percent.</strong> A $20M coin that gains $10M (+50%) ranks above a $100M coin that gains the same $10M (+10%).</div></li>
+      </ol>
+      <p class="explain__note"><strong>Market cap</strong> means the total value of a coin: its price × the number of coins in circulation. It refreshes automatically every day.</p>
+    </section>
+
+    <!-- Full board -->
+    <section class="section" id="board" aria-labelledby="boardTitle">
+      <div class="section__head section__head--row">
+        <div>
+          <h2 id="boardTitle" class="section__title">Every coin, ranked</h2>
+          <p class="section__sub" id="boardSub">Tap any row to see what happened, in one sentence.</p>
+        </div>
+        <label class="sort">
+          <span class="sr">Sort by</span>
+          <select id="sort" aria-label="Sort by">
+            <option value="pct">Biggest growth (%)</option>
+            <option value="pct-asc">Biggest drop (%)</option>
+            <option value="delta">Most value added ($)</option>
+            <option value="cap">Largest coins first</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="filters" role="search">
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"/></svg>
+          <span class="sr">Search coins</span>
+          <input id="q" type="search" placeholder="Search a coin, e.g. Ankr or ANKR" autocomplete="off" />
+        </label>
+        <div class="seg" role="radiogroup" aria-label="Coin size" id="tierSeg"></div>
+        <div class="seg" role="radiogroup" aria-label="Direction" id="dirSeg"></div>
+        <button class="chip" id="supplyBtn" type="button" aria-pressed="false" data-tip="Hide coins whose market cap moved mainly because the number of coins changed, not the price">Hide supply jumps <small id="supplyCount"></small></button>
+      </div>
+
+      <div class="board card" role="table" aria-label="Coins ranked by 24-hour market-cap change" id="table">
+        <div class="row row--head" role="row">
+          <span role="columnheader" class="c-pos">#</span>
+          <span role="columnheader" class="c-coin">Coin</span>
+          <span role="columnheader" class="c-val">Value yesterday → today</span>
+          <span role="columnheader" class="c-chg">24h change</span>
+          <span role="columnheader" class="c-bar"><span class="sr">Change bar</span></span>
+          <span role="columnheader" class="c-spark">Price, 7 days</span>
+          <span role="columnheader" class="c-price">Price</span>
+        </div>
+        <div id="rows" role="rowgroup"></div>
+      </div>
+      <div class="board__foot">
+        <p id="count" class="muted"></p>
+        <button id="more" class="btn" type="button" hidden>Show more coins</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap foot__inner">
+      <div>
+        <p class="foot__brand">Ascent</p>
+        <p class="muted" id="footMeta">Coin list from Binance public market data. Market caps from CoinGecko.</p>
+      </div>
+      <div class="foot__method">
+        <p><strong>Method.</strong> Universe: Binance spot coins currently trading, excluding stablecoins and wrapped tokens. Filter: current market cap $15M–$2B. Ranking: 24-hour market-cap change in percent. A <span class="badge badge--supply">New supply</span> tag means the market cap moved more than the price did, usually because new coins were unlocked.</p>
+        <p class="muted">For information only. This is not financial advice.</p>
+      </div>
+    </div>
+  </footer>
+
+  <div class="tip" id="tip" role="tooltip" hidden></div>
+  <script src="app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "ascent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Daily dashboard of Binance coins worth $15M–$2B, ranked by 24h market-cap growth.",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "data": "node scripts/build-data.mjs",
+    "dev": "node scripts/serve.mjs"
+  }
+}

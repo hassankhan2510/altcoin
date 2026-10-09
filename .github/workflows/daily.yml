@@ -1,0 +1,60 @@
+name: Daily update
+
+on:
+  schedule:
+    # 00:05 UTC every day (01:05 UK summer time / 00:05 UK winter time).
+    # Change the time here: https://crontab.guru/#5_0_*_*_*
+    - cron: "5 0 * * *"
+  workflow_dispatch: {} # "Run workflow" button in the Actions tab
+  push:
+    branches: [main]
+    paths-ignore: ["public/data/**", "README.md"]
+
+permissions:
+  contents: write # commit the new day's data
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily-update
+  cancel-in-progress: false
+
+jobs:
+  update-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fetch today's market data
+        if: github.event_name != 'push'
+        env:
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+        run: node scripts/build-data.mjs
+
+      - name: Save data to the repository
+        if: github.event_name != 'push'
+        run: |
+          git config user.name "ascent-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data
+          if git diff --cached --quiet; then
+            echo "No data changes."
+          else
+            git commit -m "data: $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deploy
+        uses: actions/deploy-pages@v4
