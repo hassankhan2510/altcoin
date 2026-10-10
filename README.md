@@ -11,7 +11,7 @@ Everything runs on free tiers: **GitHub Actions** fetches the data once a day, a
 ## How it works
 
 ```
-GitHub Actions (daily, 00:05 UTC)
+GitHub Actions (daily, 00:05 UTC = 5:05 AM Pakistan time)
   └─ scripts/build-data.mjs
        1. Binance public data  → which coins are trading right now
        2. CoinGecko tickers    → exact CoinGecko ID for each Binance coin

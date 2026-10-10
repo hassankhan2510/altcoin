@@ -29,22 +29,37 @@ function price(p) {
 const pct = (p, d = 1) => (p == null ? "—" : `${p > 0 ? "+" : p < 0 ? MINUS : ""}${Math.abs(p).toFixed(d)}%`);
 const dirClass = (p) => (p > 0 ? "is-up" : p < 0 ? "is-down" : "");
 const arrow = (p) => (p > 0 ? "▲" : p < 0 ? "▼" : "•");
-const longDate = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
-const shortDate = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+// ── Time: every time is shown in Pakistan Standard Time (PKT = UTC+5, no daylight saving) ──
+const TZ = "Asia/Karachi";
+// Keep in sync with the cron line in .github/workflows/daily.yml (00:05 UTC = 5:05 AM PKT).
+const SCHEDULE_UTC = { hour: 0, minute: 5 };
+const fmt = (iso, opts) => new Date(iso).toLocaleString("en-GB", { timeZone: TZ, ...opts });
+const pkTime = (iso) => fmt(iso, { hour: "numeric", minute: "2-digit", hour12: true }).toUpperCase(); // "10:43 AM"
+const pkDay = (iso) => fmt(iso, { weekday: "short", day: "numeric", month: "short" }); // "Sat 10 Oct"
+const pkLong = (iso) => fmt(iso, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+const pkStamp = (iso) => `${pkDay(iso)}, ${pkTime(iso)}`;
+const dayBefore = (iso) => new Date(new Date(iso).getTime() - 864e5).toISOString();
+const sameClockAsPK = (iso) => {
+  const o = { hour: "2-digit", minute: "2-digit", day: "numeric" };
+  return fmt(iso, o) === new Date(iso).toLocaleString("en-GB", o);
+};
+const localStamp = (iso) => new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short" }).replace(/\b(am|pm)\b/, (m) => m.toUpperCase());
+
 function ago(iso) {
   const h = (Date.now() - new Date(iso).getTime()) / 36e5;
   if (h < 1) return `${Math.max(1, Math.round(h * 60))} minutes ago`;
   if (h < 48) return `${Math.round(h)} hour${Math.round(h) === 1 ? "" : "s"} ago`;
   return `${Math.round(h / 24)} days ago`;
 }
-/** "Comparing 10:41 on 10 Oct with 10:41 the day before (GMT+5)", in the viewer's own time zone. */
-function windowLabel(iso) {
-  const t = new Date(iso);
-  const hm = t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const tz = t.toLocaleTimeString([], { timeZoneName: "short" }).split(" ").pop();
-  return `Comparing ${hm} on ${t.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} with ${hm} the day before (${tz})`;
+
+/** When the next scheduled run should happen, or "late" if today's run is overdue. */
+function nextUpdate(generatedAt) {
+  const now = new Date();
+  const slot = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), SCHEDULE_UTC.hour, SCHEDULE_UTC.minute));
+  if (now >= slot && new Date(generatedAt) < slot) return { late: true, iso: slot.toISOString() };
+  if (slot <= now) slot.setUTCDate(slot.getUTCDate() + 1);
+  return { late: false, iso: slot.toISOString() };
 }
-const localTime = (iso) => new Date(iso).toLocaleString("en-GB", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short", timeZoneName: "short" });
 
 function logo(c, size = "") {
   return `<img class="logo ${size}" src="${esc(c.image)}" alt="" loading="lazy" decoding="async" width="36" height="36" data-sym="${esc(c.symbol.slice(0, 3))}">`;
@@ -99,7 +114,7 @@ document.addEventListener("pointermove", (e) => {
     const line = sv.querySelector(".cross");
     line.setAttribute("x1", x); line.setAttribute("x2", x); line.setAttribute("visibility", "visible");
     const when = new Date(new Date(state.data.generatedAt).getTime() - (1 - i / (vals.length - 1)) * 7 * 864e5);
-    const label = when.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+    const label = `${pkStamp(when.toISOString())} PKT`;
     return showTip(`<b>${price(vals[i])}</b><br>${label}`, e.clientX, r.top);
   }
   const t = e.target.closest?.("[data-tip]");
@@ -149,9 +164,9 @@ function renderHero() {
   const s = data.summary;
   const top = data.coins.find((c) => c.id === s.topId) ?? data.coins[0];
   const isLatest = data.date === state.index?.latest || !state.index;
-  $("#eyebrowText").textContent = `${longDate(data.date)} · ${isLatest ? "Today's briefing" : "Past briefing"}`;
-  $("#window").textContent = windowLabel(data.generatedAt);
-  document.title = `Ascent — ${top.symbol} ${pct(top.capPct)} · ${shortDate(data.date)}`;
+  $("#eyebrowText").textContent = `${pkLong(data.generatedAt)} · ${isLatest ? "Latest briefing" : "Past briefing"}`;
+  renderWhen(data.generatedAt, isLatest);
+  document.title = `Ascent — ${top.symbol} ${pct(top.capPct)} · ${pkDay(data.generatedAt)}`;
 
   $("#headline").innerHTML = top.capPct > 0
     ? `<img class="logo-inline" src="${esc(top.image)}" alt="">${esc(top.name)} led the climb, <em>up&nbsp;${pct(top.capPct).slice(1)}</em> in a single day.`
@@ -171,7 +186,21 @@ function renderHero() {
     fresh.hidden = true;
     pulse.classList.toggle("is-stale", !isLatest);
   }
-  $("#footMeta").textContent = `Updated ${localTime(data.generatedAt)}. Coin list from Binance public market data, market caps from CoinGecko.`;
+  $("#footMeta").textContent = `Updated ${pkStamp(data.generatedAt)} PKT. Coin list from Binance public market data, market caps from CoinGecko.`;
+}
+
+/** The time box under the date: exact window, last update, next update — all in PKT. */
+function renderWhen(gen, isLatest) {
+  const next = nextUpdate(gen);
+  const nextText = next.late
+    ? `Running late, due since ${pkTime(next.iso)}`
+    : `${pkDay(next.iso)}, around ${pkTime(next.iso)}`;
+  const yours = sameClockAsPK(gen) ? "" : ` In your time zone, this update was ${localStamp(gen)}.`;
+  $("#when").innerHTML = `
+    <div><dt>Comparing</dt><dd>${pkStamp(dayBefore(gen))} → ${pkStamp(gen)}</dd></div>
+    <div><dt>Updated</dt><dd>${pkStamp(gen)} <span>(${ago(gen)})</span></dd></div>
+    ${isLatest ? `<div><dt>Next update</dt><dd>${nextText}</dd></div>` : ""}
+    <p class="when__tz">All times are <strong>Pakistan Standard Time (PKT, UTC+5)</strong>.${yours}</p>`;
 }
 
 function renderMood() {
@@ -193,9 +222,9 @@ function renderMood() {
 
 function compareBars(c) {
   const max = Math.max(c.cap, c.capPrev);
-  return `<div class="compare" role="img" aria-label="Total value went from ${usd(c.capPrev)} yesterday to ${usd(c.cap)} today">
-    <div class="compare__row"><span>Yesterday</span><div class="compare__track"><div class="compare__fill compare__fill--before" style="width:${(c.capPrev / max) * 100}%"></div></div><b>${usd(c.capPrev)}</b></div>
-    <div class="compare__row"><span>Today</span><div class="compare__track"><div class="compare__fill compare__fill--after" style="width:${(c.cap / max) * 100}%"></div></div><b>${usd(c.cap)}</b></div>
+  return `<div class="compare" role="img" aria-label="Total value went from ${usd(c.capPrev)} on ${pkStamp(dayBefore(state.data.generatedAt))} to ${usd(c.cap)} on ${pkStamp(state.data.generatedAt)} Pakistan time">
+    <div class="compare__row"><span>${pkDay(dayBefore(state.data.generatedAt)).split(" ")[0]} ${pkTime(dayBefore(state.data.generatedAt))}</span><div class="compare__track"><div class="compare__fill compare__fill--before" style="width:${(c.capPrev / max) * 100}%"></div></div><b>${usd(c.capPrev)}</b></div>
+    <div class="compare__row"><span>${pkDay(state.data.generatedAt).split(" ")[0]} ${pkTime(state.data.generatedAt)}</span><div class="compare__track"><div class="compare__fill compare__fill--after" style="width:${(c.cap / max) * 100}%"></div></div><b>${usd(c.cap)}</b></div>
   </div>`;
 }
 
@@ -296,7 +325,7 @@ function rowHTML(c, scale) {
       <span class="c-price" role="cell">${price(c.price)}<small class="${dirClass(c.pricePct)}">${pct(c.pricePct)}</small></span>
     </button>
     <div class="detail" id="d-${esc(c.id)}">
-      <p>Yesterday, all the ${esc(c.symbol)} coins in circulation were worth <strong>${usd(c.capPrev)}</strong> together. Today they're worth <strong>${usd(c.cap)}</strong>. That's <strong>${usd(Math.abs(c.capDelta))} ${verb}</strong>, a change of <strong class="${dirClass(c.capPct)}">${pct(c.capPct)}</strong>.${priceLine}${supplyLine}</p>
+      <p>On <strong>${pkStamp(dayBefore(state.data.generatedAt))}</strong> (PKT), all the ${esc(c.symbol)} coins in circulation were worth <strong>${usd(c.capPrev)}</strong> together. 24 hours later, on <strong>${pkStamp(state.data.generatedAt)}</strong>, they were worth <strong>${usd(c.cap)}</strong>. That's <strong>${usd(Math.abs(c.capDelta))} ${verb}</strong>, a change of <strong class="${dirClass(c.capPct)}">${pct(c.capPct)}</strong>.${priceLine}${supplyLine}</p>
       <div class="detail__facts">
         <span>Price <b>${price(c.price)}</b></span>
         <span>Price over 7 days <b class="${dirClass(c.price7dPct)}">${pct(c.price7dPct)}</b></span>
@@ -386,7 +415,7 @@ $("#themeBtn").addEventListener("click", () => {
   const sel = $("#dateSelect");
   if (state.index?.days?.length) {
     sel.innerHTML = state.index.days.map((d, i) =>
-      `<option value="${d.date}">${i === 0 ? "Today" : shortDate(d.date)}${d.top ? ` · ${esc(d.top.symbol)} ${pct(d.top.capPct, 0)}` : ""}</option>`).join("");
+      `<option value="${d.date}">${i === 0 ? "Latest" : pkStamp(d.generatedAt ?? `${d.date}T12:00:00Z`)}${d.top ? ` · ${esc(d.top.symbol)} ${pct(d.top.capPct, 0)}` : ""}</option>`).join("");
   } else {
     sel.closest(".datepick").hidden = true;
   }

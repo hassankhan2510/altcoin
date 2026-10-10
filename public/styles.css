@@ -213,7 +213,7 @@ a { color: inherit; }
 .pod__pct b { display: block; font-size: 32px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; color: var(--up); }
 .pod__pct small { font-size: 12.5px; color: var(--muted); }
 .compare { display: grid; gap: 6px; }
-.compare__row { display: grid; grid-template-columns: 74px 1fr 72px; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); }
+.compare__row { display: grid; grid-template-columns: 96px 1fr 72px; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); }
 .compare__row b { font-weight: 600; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
 .compare__track { height: 10px; border-radius: 0 4px 4px 0; background: transparent; position: relative; }
 .compare__fill { position: absolute; inset: 0 auto 0 0; border-radius: 0 4px 4px 0; }
@@ -409,6 +409,17 @@ main[aria-busy="false"] .ph { display: none; }
   body { background: #fff; }
 }
 
-/* Exact comparison window under the eyebrow */
-.window { margin: -10px 0 16px; font-size: 13.5px; color: var(--muted); }
+/* Time box under the eyebrow: exact window, last and next update, in PKT */
+.when {
+  display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: 8px 28px;
+  margin: 0 0 24px; padding: 12px 16px; border: 1px solid var(--hair); border-radius: 12px; background: var(--surface);
+}
+.when div { min-width: 0; }
+.when dt { font-size: 11.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.when dd { margin: 3px 0 0; font-size: 14.5px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+.when dd span { color: var(--muted); font-weight: 400; }
+.when__tz { grid-column: 1 / -1; margin: 0; padding-top: 8px; border-top: 1px solid var(--hair); font-size: 13px; color: var(--ink-2); }
+.when__tz strong { color: var(--ink); font-weight: 600; }
+@media (max-width: 860px) { .when { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .when { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .datepick select { max-width: 168px; text-overflow: ellipsis; } .brand__name { font-size: 24px; } }

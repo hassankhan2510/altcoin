@@ -99,7 +99,7 @@ git push -u origin feature/my-change
 ## 4. Architecture
 
 ```
-┌──────────────────────── GitHub Actions (daily 00:05 UTC) ────────────────────────┐
+┌──────────────────────── GitHub Actions (daily 00:05 UTC = 05:05 PKT) ────────────────┐
 │                                                                                   │
 │  scripts/build-data.mjs                                                           │
 │   1. Binance  data-api.binance.vision/api/v3/exchangeInfo  → coins TRADING (~507) │
@@ -219,7 +219,7 @@ git push -u origin feature/my-change
 
 **Sections, top to bottom:**
 1. **Header**: brand, date picker (past days), light/dark toggle.
-2. **Hero**: under the date, a line states the exact comparison window in the visitor's own time zone (e.g. "Comparing 10:43 on 10 Oct with 10:43 the day before (GMT+5)"); then a big headline ("Treasure led the climb, up 82.6% in a single day") + plain-English briefing; a warning appears if the data is more than 30h old.
+2. **Hero**: under the date, a **time box** shows, in **Pakistan Standard Time (PKT)**: *Comparing* (exact 24h window, e.g. "Fri 9 Oct, 10:43 AM → Sat 10 Oct, 10:43 AM"), *Updated* (time + "x hours ago"), and *Next update* (from `SCHEDULE_UTC` in `app.js`, or "running late" if overdue). Visitors outside Pakistan also see the update time in their own zone. Then a big headline ("Treasure led the climb, up 82.6% in a single day") + plain-English briefing; a warning appears if the data is more than 30h old.
 3. **Market mood card**: % of coins that grew, grew/shrank bar, coins tracked, typical (median) change, total value added.
 4. **Top three climbers**: yesterday-vs-today bars + 7-day price line. Excludes "New supply" coins.
 5. **"How this works, in plain words"**: 3 numbered steps + a definition of market cap.
@@ -258,7 +258,7 @@ $env:COINGECKO_API_KEY = "your-demo-key"; npm run data
 
 | Trigger | What happens |
 |---|---|
-| **Schedule** `5 0 * * *` (00:05 UTC daily) | Fetch data → commit → deploy |
+| **Schedule** `5 0 * * *` (00:05 UTC = **5:05 AM PKT** daily) | Fetch data → commit → deploy |
 | **Manual** (Actions tab → *Daily update* → **Run workflow**) | Fetch data → commit → deploy |
 | **Push to `main`** (except changes only to `public/data/**` or `README.md`) | Deploy the site only (no fetch) |
 
@@ -276,7 +276,9 @@ $env:COINGECKO_API_KEY = "your-demo-key"; npm run data
 4. **Actions → Daily update → Run workflow** to get fresh data immediately.
 
 ### Changing the daily time
-Edit the cron line. Times are **UTC** (UK is UTC+0 in winter, UTC+1 in summer). Example for 07:00 UK winter time: `0 7 * * *`. Use https://crontab.guru to check.
+Edit the cron line. Cron times are **UTC**. Pakistan (PKT) is **UTC+5 with no daylight saving**, so subtract 5 hours: for 7:00 AM PKT use `0 2 * * *`. **Also update `SCHEDULE_UTC` in `public/app.js`** so the site's "Next update" time stays correct. Use https://crontab.guru to check.
+
+All times on the site are shown in PKT (`TZ = "Asia/Karachi"` in `public/app.js`). The saved data stores times in UTC (`generatedAt`).
 
 ---
 
@@ -324,6 +326,7 @@ Built and tested on 2026-10-10, then **removed from the live site at the owner's
 | 2026-10-09 | Added "New supply" detection (OpenLedger +380% vs price +3.4%), excluded tokenized stocks, headline/podium use genuine climbers only, "Hide supply jumps" filter. |
 | 2026-10-10 | Pushed to GitHub (`hassankhan2510/altcoin`), added this handover document. Enabled GitHub Pages; first scheduled run committed data at 05:41 UTC. |
 | 2026-10-10 | Built the Real Growth Score + Real Growth page, then **parked it on `feature/real-growth`** for more research. Kept from that work: exact comparison-window line, `.gitattributes` (LF), `ASCENT_DATA_DIR`, narrower date picker on phones. |
+| 2026-10-10 | All times shown in **Pakistan Standard Time (PKT)**: time box (Comparing / Updated / Next update), exact times in coin explanations, podium bars, date picker and price-line tooltips; local time added for visitors outside Pakistan. |
 
 ---
 

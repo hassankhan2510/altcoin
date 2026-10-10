@@ -2,7 +2,8 @@ name: Daily update
 
 on:
   schedule:
-    # 00:05 UTC every day (01:05 UK summer time / 00:05 UK winter time).
+    # 00:05 UTC every day = 5:05 AM Pakistan Standard Time (PKT is UTC+5, no daylight saving).
+    # To pick a PKT time, subtract 5 hours. Also update SCHEDULE_UTC in public/app.js.
     # Change the time here: https://crontab.guru/#5_0_*_*_*
     - cron: "5 0 * * *"
   workflow_dispatch: {} # "Run workflow" button in the Actions tab
