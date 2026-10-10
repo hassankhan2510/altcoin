@@ -21,7 +21,7 @@ GitHub Actions (daily, 00:05 UTC)
   └─ commit the data → deploy public/ to GitHub Pages
 ```
 
-* **Why market-cap % and not price %?** Market cap = price × coins in circulation. When the two differ by more than 3 points, the coin gets a **New supply** tag, which usually means a token unlock. This tag is a useful early warning.
+* **Real Growth Score:** market cap = price × coins in circulation, so every move splits into growth from buyers (price) and growth from new coins (supply). Each coin gets a 0–100 score, and the **Real Growth** page (`real.html`) shows where the day's growth really came from.
 * **Why `data-api.binance.vision`?** `api.binance.com` blocks US-based servers, and GitHub's runners are in the US. The `data-api` mirror is Binance's official public market-data endpoint and isn't blocked.
 * **History:** each day is saved, so the date picker can show any past day (the last 365 are kept).
 

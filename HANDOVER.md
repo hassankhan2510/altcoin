@@ -84,7 +84,8 @@ git push -u origin feature/my-change
 | **Static site, no build step** (plain HTML/CSS/JS) | Nothing can break in a build at demo time. It loads fast and is easy to host anywhere. |
 | **Zero npm dependencies** | Nothing to install, nothing to go out of date, no supply-chain risk. Node 18+ has `fetch` built in. |
 | Data stored as **JSON committed to the repo** | Free "database"; gives full history and an audit trail in git. |
-| **"New supply" flag** | Found on day one: OpenLedger showed **+380%** market cap while its price only rose **+3.4%**. CoinGecko had revised its circulating supply, so nobody was actually buying. Market cap = price × circulating supply, so when the two diverge by more than 3 percentage points the coin is tagged. Tagged coins **stay in the ranked table** (true to the spec) but are **left out of the headline and top-three podium**, and the briefing explains why. |
+| **Real Growth Score (0–100)**, the product's signature feature | Found on day one: OpenLedger showed **+380%** market cap while its price only rose **+3.4%**. CoinGecko had revised its circulating supply, so nobody was actually buying. Since market cap = price × circulating supply, every move splits exactly into a **price part (buyers)** and a **supply part (new coins)**. The score is the price part's share. Coins with mostly supply-driven growth **stay in the ranked table** (true to the spec) but are **left out of the headline and top-three podium**, and get their own section on the Real Growth page. Pitch line: *"Other dashboards show which coins grew. Ascent shows which growth is real."* |
+| **One formula file shared by pipeline and website** (`public/score.js`) | The score can never differ between the saved data and what the page shows. Older snapshots without the score are scored in the browser. |
 | **Exclude stablecoins, wrapped tokens, tokenized stocks** | Their "market cap growth" is minting or represents equity, not crypto demand. Coinbase/Intel "bStocks" tokens showed up on the first run and were removed. |
 
 ---
@@ -119,9 +120,13 @@ git push -u origin feature/my-change
 ├── .github/workflows/daily.yml   # schedule + data job + Pages deploy
 ├── .claude/launch.json           # local preview config for Claude Code (optional)
 ├── public/                       # THE WEBSITE: this folder is what gets deployed
-│   ├── index.html                # page structure + plain-words explainer copy
-│   ├── styles.css                # design tokens (light/dark), layout, responsive rules
-│   ├── app.js                    # loads JSON, renders everything, filters, tooltips
+│   ├── index.html                # "Today" page: structure + plain-words explainer copy
+│   ├── app.js                    # "Today" page logic: hero, podium, ranked table, filters
+│   ├── real.html                 # "Real Growth" page: buyers vs new coins
+│   ├── real.js                   # "Real Growth" page logic
+│   ├── common.js                 # shared: formatting, sparklines, score pills, tooltips, theme, date picker, nav
+│   ├── score.js                  # THE Real Growth Score formula (also imported by the pipeline)
+│   ├── styles.css                # design tokens (light/dark), layout, responsive rules (both pages)
 │   ├── favicon.svg
 │   └── data/                     # GENERATED; committed daily by the bot. Don't hand-edit.
 │       ├── latest.json
@@ -146,7 +151,8 @@ git push -u origin feature/my-change
 | `MIN_CAP` | `15_000_000` | Lower market-cap bound (USD) |
 | `MAX_CAP` | `2_000_000_000` | Upper market-cap bound (USD) |
 | `HISTORY_DAYS` | `365` | Daily snapshots kept; older ones are deleted |
-| `SUPPLY_FLAG_PTS` | `3` | Gap (in % points) between mcap change and price change that triggers "New supply" |
+| `SUPPLY_FLAG_PTS` | `3` | Legacy `supplyDriven` flag (gap in % points between mcap and price change). The UI now uses the Real Growth Score. |
+| `SUPPLY_NOISE` (in `public/score.js`) | `0.01` | Supply changes under 1% are treated as data noise, not a supply event |
 | `SPARK_POINTS` | `42` | 7-day price-line resolution (downsampled from 168 hourly points) |
 | `EXCLUDE` | set of symbols | Stablecoins, fiat tokens, wrapped/staked copies |
 | `EXCLUDE_NAME` | regex | Tokenized stocks/ETFs (by coin name) |
@@ -157,6 +163,7 @@ git push -u origin feature/my-change
 |---|---|---|
 | `COINGECKO_API_KEY` | Recommended | Free CoinGecko **Demo** key. Without it, requests are throttled (HTTP 429). The script retries automatically, but runs are slower (about 5 min) and less reliable on GitHub's shared IPs. |
 | `COINGECKO_PRO` | No | Set to `1` only if you upgrade to a paid Pro key (switches base URL and header). |
+| `ASCENT_DATA_DIR` | No | Write output to a different folder. Use it to test the pipeline without touching the published data. |
 
 ### Rate limiting and retries
 - Gap between CoinGecko calls: 2.2s with a key, 6.5s without.
@@ -168,7 +175,21 @@ git push -u origin feature/my-change
 - `capDelta` = CoinGecko `market_cap_change_24h`
 - `capPrev` = `cap − capDelta` (market cap 24h ago)
 - `capPct` = CoinGecko `market_cap_change_percentage_24h`, **the ranking key**
-- `supplyGap` = `capPct − pricePct`; `supplyDriven` = `|supplyGap| ≥ 3`
+- `supplyGap` = `capPct − pricePct`; `supplyDriven` = `|supplyGap| ≥ 3` (legacy)
+
+### Real Growth Score (`public/score.js` → `realGrowth()`)
+Market cap = price × coins in circulation, so: **(1 + capChange) = (1 + priceChange) × (1 + supplyChange)**.
+- `supplyPct` = (1 + capPct/100) ÷ (1 + pricePct/100) − 1, the change in the number of coins
+- `priceDelta` = `capPrev × pricePct/100`: the dollars buyers added (what the market cap would have done with no new coins)
+- `supplyDelta` = `capDelta − priceDelta`: the dollars added by new coins
+- `score` = 100 × ln(1 + price) ÷ ln(1 + cap), clamped 0–100. Log shares add up exactly.
+  - supply change ≤ 1% → 100 (noise); price ≤ 0 with real supply growth → 0
+  - only for coins that grew; shrinking coins get `score: null`
+- `verdict`: `real` (90–100), `mixed` (50–89), `supply` (0–49), `pricefell` (price dropped, value rose only from new coins), `shrank`, `flat` (too small to judge)
+- `realPct` = min(capPct, pricePct): growth buyers can take credit for (used by the "Biggest real growth" sort)
+- `summary.real` (`realSummary()`): `{ grew, total, fromPrice, fromSupply, realShare, counts }` across coins that grew
+
+Worked example (9 Oct, OpenLedger): value +379.8%, price +3.4% → supply +364% → buyers added about $0.8M, new coins about $84.9M → **score 2**.
 - `tier` = `small` (< $100M), `mid` ($100M–$500M), `large` ($500M–$2B)
 
 ### Output schema (`public/data/latest.json`)
@@ -183,7 +204,8 @@ git push -u origin feature/my-change
   "summary": {
     "universe": 306, "up": 271, "down": 35, "flat": 0,
     "median": 3.3, "netDelta": 1920000000,
-    "topId": "magic",                       // biggest GENUINE climber (not supply-driven)
+    "topId": "magic",                       // biggest climber whose growth is real or mixed (score ≥ 50)
+    "real": { "grew": 271, "total": 2170000000, "fromPrice": 2070000000, "fromSupply": 96200000, "realShare": 96, "counts": { "real": 265, "mixed": 2, "supply": 3, "pricefell": 1 } },
     "bottomId": "...",
     "tiers": { "small": {...}, "mid": {...}, "large": {...} },
     "briefing": ["plain-English sentence", "..."]
@@ -194,6 +216,7 @@ git push -u origin feature/my-change
       "tier": "mid", "cap": 107890252, "capPrev": 22563948, "capDelta": 85326304, "capPct": 378.15,
       "price": 0.108, "pricePct": 3.42, "price7dPct": -5.1, "volume": 12345678, "rank": 410,
       "supplyDriven": true, "supplyGap": 374.74,
+      "score": 2, "verdict": "supply", "supplyPct": 364.1, "priceDelta": 762000, "supplyDelta": 84564000, "realPct": 3.42,
       "spark": [/* 42 prices over 7 days */],
       "updated": "…", "binance": "https://www.binance.com/en/trade/OPEN_USDT?type=spot"
     }
@@ -209,14 +232,22 @@ git push -u origin feature/my-change
 
 **Design direction:** editorial and calm, like a financial newspaper rather than a neon crypto template. Serif headlines (*Instrument Serif*), clean sans for everything else (*Instrument Sans*), warm paper background in light mode, deep ink in dark mode. Green = grew, red = shrank, **always with ▲/▼ and a +/− sign**, so colour is never the only signal.
 
-**Sections, top to bottom:**
-1. **Header**: brand, date picker (past days), light/dark toggle.
-2. **Hero**: big headline ("Treasure led the climb, up 82.6% in a single day") + plain-English briefing; a warning appears if the data is more than 30h old.
-3. **Market mood card**: % of coins that grew, grew/shrank bar, coins tracked, typical (median) change, total value added.
-4. **Top three climbers**: yesterday-vs-today bars + 7-day price line. Excludes "New supply" coins.
-5. **"How this works, in plain words"**: 3 numbered steps + a definition of market cap.
-6. **Every coin, ranked**: search, size filter (All/Small/Mid/Large), direction (All/Growing/Shrinking), "Hide supply jumps", sort. Clicking a row opens a one-sentence explanation + Binance/CoinGecko links. Shows 50 at a time.
-7. **Footer**: method, sources, "not financial advice".
+Every page shares the header (brand, **Today / Real Growth** navigation, date picker, light/dark toggle). The chosen day (`?date=YYYY-MM-DD`) carries across pages. Under the date, a line states the exact comparison window in the visitor's own time zone (e.g. "Comparing 10:43 on 10 Oct with 10:43 the day before (GMT+5)").
+
+**Today page (`index.html` + `app.js`), top to bottom:**
+1. **Hero**: big headline ("Treasure led the climb, up 130.8% in a single day") + plain-English briefing; a warning appears if the data is more than 30h old.
+2. **Market mood card**: % of coins that grew, grew/shrank bar, coins tracked, typical (median) change, total value added, and a "95% of today's growth came from real buyers → Real Growth" link.
+3. **Top three climbers**: yesterday-vs-today bars + 7-day price line + score pill. Excludes coins whose growth is mostly new coins.
+4. **"How this works, in plain words"**: 3 numbered steps + a definition of market cap.
+5. **Every coin, ranked**: search, size filter, direction, **"Real growth only"** toggle, sort (incl. **"Biggest real growth"**). Each coin shows a score pill. Clicking a row opens a one-sentence explanation, a **buyers vs new coins** split bar, and Binance/CoinGecko links. Shows 50 at a time.
+6. **Footer**: method, sources, "not financial advice".
+
+**Real Growth page (`real.html` + `real.js`), top to bottom:**
+1. **Hero**: "95% of today's growth was real." + where the dollars came from + the day's biggest warning.
+2. **Split card**: total value added, buyers vs new coins bar, count of Real / Mixed / New coins / Price fell.
+3. **"What is the Real Growth Score?"**: bakery analogy (pricier loaves vs more loaves), the formula in one line, and the four score bands.
+4. **"Growth that didn't come from buyers"**: one card per flagged coin: value vs price vs number-of-coins change, split bar, plain sentence.
+5. **"The strongest real growth"**: top 10 climbers whose growth is real.
 
 **Responsive:** desktop shows the full table; under 1100px the sparkline column hides; under 760px each row becomes a compact card.
 
@@ -225,7 +256,10 @@ git push -u origin feature/my-change
 - Wording of the explainer → `index.html`
 - Wording of the daily briefing → `summarise()` in `scripts/build-data.mjs`
 - Wording of row explanations → `rowHTML()` in `public/app.js`
-- Brand name "Ascent" → `index.html` (title, header, footer), `README.md`, page title in `app.js` (`renderHero`)
+- Score formula, bands and noise threshold → `public/score.js` (change it **only** there; the pipeline imports it)
+- Score wording (pills, sentences) → `scorePill()` / `realSentence()` in `public/common.js`
+- Adding a new page: copy `real.html` (header + nav + footer), create `newpage.js` importing from `common.js`, call `initChrome({ onDate, generatedAt })`, and add a `<a data-href="newpage.html">` link to the `.nav` in **every** page
+- Brand name "Ascent" → `index.html` + `real.html` (title, header, footer), `README.md`, page titles in `app.js` / `real.js`
 
 ---
 
@@ -278,7 +312,9 @@ Edit the cron line. Times are **UTC** (UK is UTC+0 in winter, UTC+1 in summer). 
 - **Scheduled runs can start 5–30 min late** when GitHub is busy. This is normal.
 - **GitHub disables schedules after 60 days with no repo activity.** The daily data commit counts as activity, but if runs fail for a long time, re-enable the workflow in the Actions tab.
 - **Never call `api.binance.com` from Actions.** It's geo-blocked (HTTP 451) for US runners. Keep `data-api.binance.vision`.
-- **Supply revisions** (like OpenLedger +380% on 2026-10-09) happen regularly. That's what the "New supply" tag is for. Don't remove it; it's the dashboard's credibility feature.
+- **Supply revisions** (like OpenLedger +380% on 2026-10-09) happen regularly. That's what the Real Growth Score is for. Don't remove it; it's the dashboard's credibility feature.
+- **Line endings:** the repo uses LF (`.gitattributes`). On Windows run `git config core.autocrlf false` in your clone so scripts aren't rewritten with CRLF.
+- **Test the pipeline without overwriting published data:** `ASCENT_DATA_DIR=/tmp/ascent-test node scripts/build-data.mjs`.
 - **New stablecoins / tokenized assets** may appear over time. Add their symbols to `EXCLUDE` or extend `EXCLUDE_NAME`.
 - **Pages URL is case-sensitive** and lives under `/altcoin/`, so all asset paths in the site are **relative** (no leading `/`). Keep them that way.
 - **Moving to Vercel (optional):** import the repo, Framework preset "Other", Output Directory `public`, no build command. The Action still commits data and Vercel redeploys on each commit. Remember that the Hobby plan is non-commercial.
@@ -302,7 +338,8 @@ Edit the cron line. Times are **UTC** (UK is UTC+0 in winter, UTC+1 in summer). 
 |---|---|
 | 2026-10-09 | Project created: data pipeline, dashboard, daily workflow, README. First live run: 507 Binance coins → 306 in range. |
 | 2026-10-09 | Added "New supply" detection (OpenLedger +380% vs price +3.4%), excluded tokenized stocks, headline/podium use genuine climbers only, "Hide supply jumps" filter. |
-| 2026-10-10 | Pushed to GitHub (`hassankhan2510/altcoin`), added this handover document. |
+| 2026-10-10 | Pushed to GitHub (`hassankhan2510/altcoin`), added this handover document. Enabled GitHub Pages; first scheduled run committed data at 05:41 UTC. |
+| 2026-10-10 | **Real Growth Score** (`public/score.js`) shared by pipeline and site; new **Real Growth** page; top navigation; score pills, split bars, "Real growth only" filter and "Biggest real growth" sort on Today; exact comparison window shown in the visitor's time zone; code split into `common.js`; `.gitattributes` (LF). |
 
 ---
 
