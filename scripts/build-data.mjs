@@ -12,7 +12,6 @@
 import { mkdir, readFile, writeFile, readdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { realGrowth, realSummary } from "../public/score.js";
 
 const CONFIG = {
   MIN_CAP: 15_000_000,
@@ -181,8 +180,6 @@ function shape(rows, binanceSymbolById) {
       updated: r.last_updated,
       binance: `https://www.binance.com/en/trade/${sym}_USDT?type=spot`,
     });
-    // Real Growth Score: how much of the move came from buyers (price) vs new coins (supply).
-    Object.assign(coins.at(-1), realGrowth(coins.at(-1)));
   }
   coins.sort((a, b) => b.capPct - a.capPct);
   coins.forEach((c, i) => (c.pos = i + 1));
@@ -201,10 +198,8 @@ function summarise(coins) {
   const sorted = coins.map((c) => c.capPct).sort((a, b) => a - b);
   const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
   const netDelta = coins.reduce((s, c) => s + c.capDelta, 0);
-  // Headline = the biggest climber whose growth is mostly real (score ≥ 50); supply-driven jumps are called out separately.
-  const isReal = (c) => c.verdict === "real" || c.verdict === "mixed";
-  const top = coins.find((c) => c.capPct > 0 && isReal(c)) ?? coins[0];
-  const real = realSummary(coins);
+  // Headline = the biggest genuine climber; supply-driven jumps are called out separately.
+  const top = coins.find((c) => c.capPct > 0 && !c.supplyDriven) ?? coins[0];
   const bottom = coins.at(-1);
   const tiers = Object.fromEntries(
     ["small", "mid", "large"].map((t) => {
@@ -229,13 +224,10 @@ function summarise(coins) {
   briefing.push(
     `Across the ${coins.length} Binance coins worth between $15M and $2B, ${up.length} grew and ${down.length} shrank — ${mood}.`,
   );
-  if (real.realShare != null) {
-    briefing.push(`Of the ${fmtUsd(real.total)} in value these coins added, ${real.realShare}% came from real buyers and the rest from new coins being released.`);
-  }
-  const jump = coins.find((c) => c.capPct > 0 && (c.verdict === "supply" || c.verdict === "pricefell"));
+  const jump = coins.find((c) => c.capPct > 0 && c.supplyDriven);
   if (jump && jump.pos < (top?.pos ?? Infinity)) {
     briefing.push(
-      `${jump.name}'s value jumped ${jump.capPct.toFixed(1)}%, but its price ${jump.pricePct > 0 ? `rose only ${jump.pricePct.toFixed(1)}%` : `actually fell ${Math.abs(jump.pricePct).toFixed(1)}%`} — the jump came from new coins, not buyers (Real Growth Score ${jump.score}/100).`,
+      `${jump.name}'s market cap jumped ${jump.capPct.toFixed(1)}%, but its price moved only ${jump.pricePct?.toFixed(1)}% — more coins are now counted in circulation, so the jump didn't come from buyers. We tag these “New supply”.`,
     );
   }
 
@@ -247,7 +239,6 @@ function summarise(coins) {
     median: round(median),
     netDelta: Math.round(netDelta),
     topId: top?.id ?? null,
-    real,
     bottomId: bottom?.id ?? null,
     tiers,
     briefing,
