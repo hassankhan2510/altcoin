@@ -11,7 +11,7 @@ Everything runs on free tiers: **GitHub Actions** fetches the data once a day, a
 ## How it works
 
 ```
-GitHub Actions (daily, 00:05 UTC = 5:05 AM Pakistan time)
+GitHub Actions (00:05 UTC = 5:05 AM Pakistan time: daily + live; then every 4 hours: live only)
   └─ scripts/build-data.mjs
        1. Binance public data  → which coins are trading right now
        2. CoinGecko tickers    → exact CoinGecko ID for each Binance coin
@@ -23,7 +23,7 @@ GitHub Actions (daily, 00:05 UTC = 5:05 AM Pakistan time)
 
 * **Why market-cap % and not price %?** Market cap = price × coins in circulation. When the two differ by more than 3 points, the coin gets a **New supply** tag, which usually means a token unlock. This tag is a useful early warning.
 * **Why `data-api.binance.vision`?** `api.binance.com` blocks US-based servers, and GitHub's runners are in the US. The `data-api` mirror is Binance's official public market-data endpoint and isn't blocked.
-* **History:** each day is saved, so the date picker can show any past day (the last 365 are kept).
+* **History:** the last 30 daily snapshots are kept on main. The **Live page** (`live.html`) refreshes every 4 hours and keeps the last 3 days of snapshots on the `live-data` branch.
 
 ## Project layout
 

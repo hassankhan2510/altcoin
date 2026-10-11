@@ -10,7 +10,8 @@ This document holds everything a new developer needs to pick up this project: wh
 |---|---|
 | GitHub repository | https://github.com/hassankhan2510/altcoin |
 | Default branch | `main` |
-| Live website (GitHub Pages) | https://hassankhan2510.github.io/altcoin/ |
+| Daily page (GitHub Pages) | https://hassankhan2510.github.io/altcoin/ |
+| Live page, every 4 hours | https://hassankhan2510.github.io/altcoin/live.html |
 | Daily job + deploy logs | https://github.com/hassankhan2510/altcoin/actions |
 | Workflow file | `.github/workflows/daily.yml` |
 | Original local folder | `D:\gen ai\personal reserch\newwork` (owner's Windows machine) |
@@ -47,6 +48,7 @@ git push origin main          # pushing to main redeploys the website automatica
 | Branch | What it is |
 |---|---|
 | `main` | Live site. Every push deploys; the bot commits data here daily. |
+| `live-data` | **Bot-managed, don't edit.** The last 3 days of 4-hourly Live snapshots. Force-pushed as a single commit every run, so it never grows. |
 | `feature/real-growth` | **Parked feature:** the Real Growth Score + Real Growth page (see §10). Not live. Kept for later after more research. |
 
 For larger changes, use a feature branch and open a Pull Request into `main`:
@@ -101,17 +103,20 @@ git push -u origin feature/my-change
 ```
 ┌──────────────────────── GitHub Actions (daily 00:05 UTC = 05:05 PKT) ────────────────┐
 │                                                                                   │
+│  Two schedules: 00:05 UTC → --daily --live · every 4h after that → --live only    │
 │  scripts/build-data.mjs                                                           │
 │   1. Binance  data-api.binance.vision/api/v3/exchangeInfo  → coins TRADING (~507) │
 │   2. CoinGecko /exchanges/binance/tickers (≈15 pages)      → exact coin IDs       │
 │   3. CoinGecko /coins/markets?ids=… (batches of 100)       → mcap, 24h Δ, price,  │
 │                                                              7-day sparkline      │
 │   4. Filter $15M–$2B · exclude stables/wrapped/stocks · rank by 24h mcap %        │
-│   5. Write public/data/latest.json                                                │
-│            public/data/history/YYYY-MM-DD.json                                    │
-│            public/data/index.json                                                 │
+│   5. Daily: public/data/latest.json, history/YYYY-MM-DD.json, index.json (30 days)│
+│      Live:  public/data/live/latest.json, history/YYYY-MM-DDTHHMM.json, index.json│
+│             + change since the previous live snapshot (3 days kept)               │
 │                                                                                   │
-│  → git commit "data: YYYY-MM-DD" → push to main                                   │
+│  → daily data: git commit "data: YYYY-MM-DD" → push to main                       │
+│  → live data: force-push public/data/live to the live-data branch                 │
+│    (restored at the start of every run, including deploy-only runs)               │
 │  → upload public/ → deploy to GitHub Pages                                        │
 └───────────────────────────────────────────────────────────────────────────────────┘
                                          │
@@ -126,14 +131,16 @@ git push -u origin feature/my-change
 ├── .github/workflows/daily.yml   # schedule + data job + Pages deploy
 ├── .claude/launch.json           # local preview config for Claude Code (optional)
 ├── public/                       # THE WEBSITE: this folder is what gets deployed
-│   ├── index.html                # page structure + plain-words explainer copy
-│   ├── styles.css                # design tokens (light/dark), layout, responsive rules
-│   ├── app.js                    # loads JSON, renders everything, filters, tooltips
+│   ├── index.html                # Daily page (<body data-mode="daily">)
+│   ├── live.html                 # Live page (<body data-mode="live">): same layout + "Moving since the last update"
+│   ├── styles.css                # design tokens (light/dark), layout, responsive rules (both pages)
+│   ├── app.js                    # ONE script for both pages; behaviour switches on data-mode
 │   ├── favicon.svg
 │   └── data/                     # GENERATED; committed daily by the bot. Don't hand-edit.
 │       ├── latest.json
 │       ├── index.json
-│       └── history/YYYY-MM-DD.json
+│       ├── history/YYYY-MM-DD.json
+│       └── live/                 # NOT in main (gitignored); comes from the live-data branch
 ├── scripts/
 │   ├── build-data.mjs            # the daily data pipeline
 │   └── serve.mjs                 # tiny local static server (npm run dev)
@@ -152,7 +159,8 @@ git push -u origin feature/my-change
 |---|---|---|
 | `MIN_CAP` | `15_000_000` | Lower market-cap bound (USD) |
 | `MAX_CAP` | `2_000_000_000` | Upper market-cap bound (USD) |
-| `HISTORY_DAYS` | `365` | Daily snapshots kept; older ones are deleted |
+| `HISTORY_DAYS` | `30` | Daily snapshots kept; older ones are deleted |
+| `LIVE_KEEP` | `18` | 4-hourly Live snapshots kept (3 days) |
 | `SUPPLY_FLAG_PTS` | `3` | Gap (in % points) between mcap change and price change that triggers "New supply" |
 | `SPARK_POINTS` | `42` | 7-day price-line resolution (downsampled from 168 hourly points) |
 | `EXCLUDE` | set of symbols | Stablecoins, fiat tokens, wrapped/staked copies |
@@ -165,6 +173,15 @@ git push -u origin feature/my-change
 | `COINGECKO_API_KEY` | Recommended | Free CoinGecko **Demo** key. Without it, requests are throttled (HTTP 429). The script retries automatically, but runs are slower (about 5 min) and less reliable on GitHub's shared IPs. |
 | `COINGECKO_PRO` | No | Set to `1` only if you upgrade to a paid Pro key (switches base URL and header). |
 | `ASCENT_DATA_DIR` | No | Write output to a different folder. Use it to test the pipeline without touching the published data. |
+
+### Modes (command-line flags)
+| Command | Writes |
+|---|---|
+| `node scripts/build-data.mjs --daily` | Daily snapshot only |
+| `node scripts/build-data.mjs --live` | Live snapshot only |
+| `node scripts/build-data.mjs` (no flag) | Both (one data fetch serves both) |
+
+Live snapshots add three fields per coin, compared with the previous live snapshot: `sinceCapPct` (value change %), `posPrev` (previous rank, `null` = new to the list) and `posMove` (places gained; negative = dropped). The payload also has `prevAt`, the time of that previous snapshot.
 
 ### Rate limiting and retries
 - Gap between CoinGecko calls: 2.2s with a key, 6.5s without.
@@ -217,14 +234,23 @@ git push -u origin feature/my-change
 
 **Design direction:** editorial and calm, like a financial newspaper rather than a neon crypto template. Serif headlines (*Instrument Serif*), clean sans for everything else (*Instrument Sans*), warm paper background in light mode, deep ink in dark mode. Green = grew, red = shrank, **always with ▲/▼ and a +/− sign**, so colour is never the only signal.
 
-**Sections, top to bottom:**
-1. **Header**: brand, date picker (past days), light/dark toggle.
+There are **two pages, one script**: `index.html` (Daily) and `live.html` (Live, every 4 hours) both load `app.js`, which reads `<body data-mode>` to choose the data folder (`data/` or `data/live/`), the schedule for "Next update", and the Live-only extras. The two HTML files share the same structure, so **if you change one, make the same change in the other**.
+
+**Daily page sections, top to bottom:**
+1. **Header**: brand, **Daily / Live** navigation, date picker (past snapshots), light/dark toggle.
 2. **Hero**: under the date, a **time box** shows, in **Pakistan Standard Time (PKT)**: *Comparing* (exact 24h window, e.g. "Fri 9 Oct, 10:43 AM → Sat 10 Oct, 10:43 AM"), *Updated* (time + "x hours ago"), and *Next update* (from `SCHEDULE_UTC` in `app.js`, or "running late" if overdue). Visitors outside Pakistan also see the update time in their own zone. Then a big headline ("Treasure led the climb, up 82.6% in a single day") + plain-English briefing; a warning appears if the data is more than 30h old.
 3. **Market mood card**: % of coins that grew, grew/shrank bar, coins tracked, typical (median) change, total value added.
 4. **Top three climbers**: yesterday-vs-today bars + 7-day price line. Excludes "New supply" coins.
 5. **"How this works, in plain words"**: 3 numbered steps + a definition of market cap.
 6. **Every coin, ranked**: search, size filter (All/Small/Mid/Large), direction (All/Growing/Shrinking), "Hide supply jumps", sort. Clicking a row opens a one-sentence explanation + Binance/CoinGecko links. Shows 50 at a time.
 7. **Footer**: method, sources, "not financial advice".
+
+**Live page extras:**
+- Time box adds **Since last update** (e.g. "1:05 PM → 5:05 PM (4 hours)"); "Next update" uses the 4-hour slots.
+- Headline "Right now, X leads, up Y% in 24 hours", plus one sentence about the biggest move since the last update.
+- **"Moving since the last update"** section: *Rising fastest*, *Falling fastest*, *Climbing the ranking*, and *New to the list*.
+- In the table, each position shows its ranking move (▲3 / ▼2 / New), the change column shows the change since the last update (e.g. "4h +1.2%"), and there's an extra sort: **Fastest in the last 4 hours**.
+- Freshness warning after 9 hours instead of 30.
 
 **Responsive:** desktop shows the full table; under 1100px the sparkline column hides; under 760px each row becomes a compact card.
 
@@ -233,7 +259,8 @@ git push -u origin feature/my-change
 - Wording of the explainer → `index.html`
 - Wording of the daily briefing → `summarise()` in `scripts/build-data.mjs`
 - Wording of row explanations → `rowHTML()` in `public/app.js`
-- Brand name "Ascent" → `index.html` (title, header, footer), `README.md`, page title in `app.js` (`renderHero`)
+- Brand name "Ascent" → `index.html` + `live.html` (title, header, footer), `README.md`, page title in `app.js` (`renderHero`)
+- Schedule shown on the site → `SCHEDULE_UTC` in `app.js` (must match the cron lines)
 
 ---
 
@@ -242,7 +269,7 @@ git push -u origin feature/my-change
 Requires **Node.js 18+** (developed on Node 24). No `npm install` needed.
 
 ```bash
-npm run data    # fetch live data → public/data/  (2–6 min without an API key)
+npm run data    # fetch data → public/data/ (daily) and public/data/live/ (live)  (2–6 min without an API key)
 npm run dev     # serve the site at http://localhost:5173
 ```
 
@@ -258,13 +285,16 @@ $env:COINGECKO_API_KEY = "your-demo-key"; npm run data
 
 | Trigger | What happens |
 |---|---|
-| **Schedule** `5 0 * * *` (00:05 UTC = **5:05 AM PKT** daily) | Fetch data → commit → deploy |
-| **Manual** (Actions tab → *Daily update* → **Run workflow**) | Fetch data → commit → deploy |
+| **Schedule** `5 0 * * *` (00:05 UTC = **5:05 AM PKT**) | Fetch once → daily snapshot (commit to main) + live snapshot (live-data branch) → deploy |
+| **Schedule** `5 4,8,12,16,20 * * *` (**9:05 AM, 1:05 PM, 5:05 PM, 9:05 PM, 1:05 AM PKT**) | Fetch → live snapshot only → deploy |
+| **Manual** (Actions tab → *Daily update* → **Run workflow**) | Same as the 00:05 run: daily + live |
 | **Push to `main`** (except changes only to `public/data/**` or `README.md`) | Deploy the site only (no fetch) |
 
 - Commits made by the workflow use `GITHUB_TOKEN`, which **doesn't** re-trigger workflows, so there's no infinite loop.
 - `concurrency: daily-update` stops two runs overlapping.
-- Timeout: 20 minutes.
+- The mode is picked by comparing `github.event.schedule` with `LIVE_CRON` at the top of the workflow. **If you edit the live cron line, edit `LIVE_CRON` to the identical string.**
+- Every run (including deploy-only pushes) first restores `public/data/live/` from the `live-data` branch, so the Live page is always deployed.
+- Timeout: 25 minutes.
 
 ### One-time repository setup (needs the repo owner)
 
@@ -275,8 +305,8 @@ $env:COINGECKO_API_KEY = "your-demo-key"; npm run data
    - Value: a free Demo key from https://www.coingecko.com/en/developers/dashboard
 4. **Actions → Daily update → Run workflow** to get fresh data immediately.
 
-### Changing the daily time
-Edit the cron line. Cron times are **UTC**. Pakistan (PKT) is **UTC+5 with no daylight saving**, so subtract 5 hours: for 7:00 AM PKT use `0 2 * * *`. **Also update `SCHEDULE_UTC` in `public/app.js`** so the site's "Next update" time stays correct. Use https://crontab.guru to check.
+### Changing the schedule
+Edit the cron lines (and `LIVE_CRON`). Cron times are **UTC**. Pakistan (PKT) is **UTC+5 with no daylight saving**, so subtract 5 hours: for 7:00 AM PKT use `0 2 * * *`. **Also update `SCHEDULE_UTC` in `public/app.js`** so the site's "Next update" time stays correct. Use https://crontab.guru to check.
 
 All times on the site are shown in PKT (`TZ = "Asia/Karachi"` in `public/app.js`). The saved data stores times in UTC (`generatedAt`).
 
@@ -285,7 +315,8 @@ All times on the site are shown in PKT (`TZ = "Asia/Karachi"` in `public/app.js`
 ## 9. Known issues and gotchas
 
 - **CoinGecko 429s without a key**: expected; handled by retries. Add the secret to make runs fast and reliable.
-- **Scheduled runs can start 5–30 min late** when GitHub is busy. This is normal.
+- **Scheduled runs can start late** when GitHub is busy. On the free tier we've seen the 5:05 AM PKT run start at about 10:35 AM PKT (5.5 hours late) on both 10 and 11 Oct. The site handles this: each page shows the exact time of its data and says "Running late" when an update is overdue.
+- **Live runs without a CoinGecko key** (6 a day) are slow and more likely to hit rate limits. The free Demo key is strongly recommended.
 - **GitHub disables schedules after 60 days with no repo activity.** The daily data commit counts as activity, but if runs fail for a long time, re-enable the workflow in the Actions tab.
 - **Never call `api.binance.com` from Actions.** It's geo-blocked (HTTP 451) for US runners. Keep `data-api.binance.vision`.
 - **Supply revisions** (like OpenLedger +380% on 2026-10-09) happen regularly. That's what the "New supply" tag is for. Don't remove it; it's the dashboard's credibility feature.
@@ -326,6 +357,7 @@ Built and tested on 2026-10-10, then **removed from the live site at the owner's
 | 2026-10-09 | Added "New supply" detection (OpenLedger +380% vs price +3.4%), excluded tokenized stocks, headline/podium use genuine climbers only, "Hide supply jumps" filter. |
 | 2026-10-10 | Pushed to GitHub (`hassankhan2510/altcoin`), added this handover document. Enabled GitHub Pages; first scheduled run committed data at 05:41 UTC. |
 | 2026-10-10 | Built the Real Growth Score + Real Growth page, then **parked it on `feature/real-growth`** for more research. Kept from that work: exact comparison-window line, `.gitattributes` (LF), `ASCENT_DATA_DIR`, narrower date picker on phones. |
+| 2026-10-11 | **Live page** (`live.html`), refreshed every 4 hours with changes since the last update and ranking moves; Daily/Live navigation; pipeline `--daily`/`--live` modes; live snapshots on the `live-data` branch (3 days kept); daily history cut from 365 to 30 days. |
 | 2026-10-10 | All times shown in **Pakistan Standard Time (PKT)**: time box (Comparing / Updated / Next update), exact times in coin explanations, podium bars, date picker and price-line tooltips; local time added for visitors outside Pakistan. |
 
 ---

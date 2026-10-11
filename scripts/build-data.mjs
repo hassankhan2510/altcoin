@@ -5,7 +5,9 @@
 //    so two different coins sharing a symbol never get mixed up).
 // 3. Pull market caps + 24h change for those coins from CoinGecko.
 // 4. Keep coins with a market cap between MIN_CAP and MAX_CAP, rank by 24h market-cap % change.
-// 5. Write public/data/latest.json + a dated snapshot + an index of available dates.
+// 5. Daily (--daily): write public/data/latest.json + a dated snapshot + an index (last 30 days).
+//    Live (--live): write public/data/live/… every 4 hours, adding "since the last update" changes
+//    (last 3 days kept). No flag = both. The workflow picks the mode from the cron that fired.
 //
 // Zero dependencies — runs on Node 18+ (uses built-in fetch).
 
@@ -16,7 +18,8 @@ import { fileURLToPath } from "node:url";
 const CONFIG = {
   MIN_CAP: 15_000_000,
   MAX_CAP: 2_000_000_000,
-  HISTORY_DAYS: 365,
+  HISTORY_DAYS: 30, // daily snapshots kept
+  LIVE_KEEP: 18, // 4-hourly snapshots kept (3 days)
   // When |market-cap % change − price % change| exceeds this, the move was driven by
   // coins entering/leaving circulation (e.g. a token unlock), not by price.
   SUPPLY_FLAG_PTS: 3,
@@ -38,6 +41,11 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // ASCENT_DATA_DIR lets you test the pipeline without touching the published data.
 const DATA_DIR = process.env.ASCENT_DATA_DIR ?? join(ROOT, "public", "data");
 const HISTORY_DIR = join(DATA_DIR, "history");
+const LIVE_DIR = join(DATA_DIR, "live");
+
+const ARGS = new Set(process.argv.slice(2));
+const DO_DAILY = ARGS.has("--daily") || !ARGS.has("--live");
+const DO_LIVE = ARGS.has("--live") || !ARGS.has("--daily");
 
 const CG_KEY = process.env.COINGECKO_API_KEY?.trim();
 const CG_PRO = process.env.COINGECKO_PRO === "1";
@@ -267,24 +275,60 @@ async function main() {
     coins,
   };
 
-  await mkdir(HISTORY_DIR, { recursive: true });
-  const json = JSON.stringify(payload);
-  await writeFile(join(DATA_DIR, "latest.json"), json);
-  await writeFile(join(HISTORY_DIR, `${date}.json`), json);
-
-  // Rebuild the index of snapshot dates and prune anything older than HISTORY_DAYS.
-  const files = (await readdir(HISTORY_DIR)).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort().reverse();
-  const keep = files.slice(0, CONFIG.HISTORY_DAYS);
-  for (const f of files.slice(CONFIG.HISTORY_DAYS)) await unlink(join(HISTORY_DIR, f));
-  const index = [];
-  for (const f of keep) {
-    const d = JSON.parse(await readFile(join(HISTORY_DIR, f), "utf8"));
-    const top = d.coins.find((c) => c.id === d.summary.topId) ?? d.coins[0];
-    index.push({ date: d.date, generatedAt: d.generatedAt, universe: d.summary.universe, up: d.summary.up, top: top && { symbol: top.symbol, capPct: top.capPct } });
-  }
-  await writeFile(join(DATA_DIR, "index.json"), JSON.stringify({ latest: date, days: index }));
+  if (DO_DAILY) await writeDaily(payload);
+  if (DO_LIVE) await writeLive(payload);
 
   log(`Done: ${coins.length} coins in range, top = ${coins[0].symbol} ${coins[0].capPct}% — ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+}
+
+// ── Snapshot storage ───────────────────────────────────────────────────────────
+const indexEntry = (d) => {
+  const top = d.coins.find((c) => c.id === d.summary.topId) ?? d.coins[0];
+  return { date: d.date, generatedAt: d.generatedAt, universe: d.summary.universe, up: d.summary.up, top: top && { symbol: top.symbol, capPct: top.capPct } };
+};
+
+/** Write latest + history/<key>.json, keep the newest `keep` snapshots, rebuild index.json. */
+async function saveSnapshots(dir, payload, keep, pattern) {
+  const hist = join(dir, "history");
+  await mkdir(hist, { recursive: true });
+  const json = JSON.stringify(payload);
+  await writeFile(join(dir, "latest.json"), json);
+  await writeFile(join(hist, `${payload.date}.json`), json);
+  const files = (await readdir(hist)).filter((f) => pattern.test(f)).sort().reverse();
+  for (const f of files.slice(keep)) await unlink(join(hist, f));
+  const index = [];
+  for (const f of files.slice(0, keep)) index.push(indexEntry(JSON.parse(await readFile(join(hist, f), "utf8"))));
+  await writeFile(join(dir, "index.json"), JSON.stringify({ latest: payload.date, days: index }));
+}
+
+async function writeDaily(payload) {
+  await saveSnapshots(DATA_DIR, { ...payload, mode: "daily" }, CONFIG.HISTORY_DAYS, /^\d{4}-\d{2}-\d{2}\.json$/);
+  log(`Daily snapshot saved (${payload.date})`);
+}
+
+async function writeLive(payload) {
+  // Snapshot key like "2026-10-10T0541" (UTC), so files sort by time.
+  const key = payload.generatedAt.slice(0, 16).replace(":", "");
+  const pattern = /^\d{4}-\d{2}-\d{2}T\d{4}\.json$/;
+  const hist = join(LIVE_DIR, "history");
+  await mkdir(hist, { recursive: true });
+
+  // Compare with the previous live snapshot: value change and ranking change since then.
+  const prevFile = (await readdir(hist)).filter((f) => pattern.test(f) && f !== `${key}.json`).sort().at(-1);
+  const prev = prevFile ? JSON.parse(await readFile(join(hist, prevFile), "utf8")) : null;
+  const before = new Map((prev?.coins ?? []).map((c) => [c.id, c]));
+  const coins = payload.coins.map((c) => {
+    const p = before.get(c.id);
+    return {
+      ...c,
+      sinceCapPct: p?.cap ? round((c.cap / p.cap - 1) * 100) : null,
+      posPrev: p?.pos ?? null,
+      posMove: p ? p.pos - c.pos : null, // positive = moved up the ranking
+    };
+  });
+
+  await saveSnapshots(LIVE_DIR, { ...payload, mode: "live", date: key, prevAt: prev?.generatedAt ?? null, coins }, CONFIG.LIVE_KEEP, pattern);
+  log(`Live snapshot saved (${key})${prev ? `, compared with ${prev.date}` : ", first live snapshot"}`);
 }
 
 main().catch((err) => {

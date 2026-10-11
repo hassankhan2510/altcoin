@@ -421,5 +421,45 @@ main[aria-busy="false"] .ph { display: none; }
 .when__tz { grid-column: 1 / -1; margin: 0; padding-top: 8px; border-top: 1px solid var(--hair); font-size: 13px; color: var(--ink-2); }
 .when__tz strong { color: var(--ink); font-weight: 600; }
 @media (max-width: 860px) { .when { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 861px) { .when:has(> div:nth-of-type(4)) { grid-template-columns: repeat(4, auto); } }
 @media (max-width: 520px) { .when { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .datepick select { max-width: 168px; text-overflow: ellipsis; } .brand__name { font-size: 24px; } }
+
+/* ── Navigation: Daily / Live ──────────────────────────────────────────── */
+.nav { display: flex; gap: 4px; margin-right: auto; margin-left: 20px; }
+.nav a {
+  position: relative; display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 12px;
+  border-radius: 9px; text-decoration: none; font-size: 14.5px; font-weight: 500; color: var(--ink-2);
+}
+.nav a:hover { color: var(--ink); background: var(--sunk); }
+.nav a[aria-current="page"] { color: var(--ink); font-weight: 600; }
+.nav a[aria-current="page"]::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -13px; height: 2px; border-radius: 2px; background: var(--accent); }
+.nav__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--up-fill); animation: pulse 2.4s infinite; }
+@media (prefers-reduced-motion: reduce) { .nav__dot { animation: none; } }
+@media (max-width: 760px) {
+  .top__inner { flex-wrap: wrap; height: auto; padding-top: 12px; row-gap: 4px; }
+  .nav { order: 3; width: 100%; margin: 0 -12px; }
+  .nav a[aria-current="page"]::after { bottom: 0; }
+}
+
+/* ── Live: rank movement next to the position ──────────────────────────── */
+.c-pos { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; line-height: 1.2; }
+.mv { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mv--new { padding: 1px 5px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
+
+/* ── Live: "Moving since the last update" ──────────────────────────────── */
+.moves { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 960px) { .moves { grid-template-columns: 1fr; } }
+.moves__card { padding: 18px 20px; }
+.moves__card h3 { margin: 0; font-size: 17px; font-weight: 600; }
+.moves__card > p { margin: 2px 0 12px; font-size: 13.5px; }
+.moves__card ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.moves__card li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--hair); }
+.moves__card li:first-child { border-top: 0; }
+.moves__name { min-width: 0; flex: 1; }
+.moves__name strong { display: block; font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.moves__name small { font-size: 12.5px; color: var(--muted); }
+.moves__card li > b { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.moves__new { grid-column: 1 / -1; margin: 0; padding: 12px 16px; border-radius: 12px; background: var(--accent-soft); color: var(--ink-2); font-size: 14.5px; }
+.moves__new b { color: var(--ink); }
+.moves .empty { grid-column: 1 / -1; }

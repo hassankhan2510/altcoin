@@ -2,17 +2,19 @@ name: Daily update
 
 on:
   schedule:
-    # 00:05 UTC every day = 5:05 AM Pakistan Standard Time (PKT is UTC+5, no daylight saving).
-    # To pick a PKT time, subtract 5 hours. Also update SCHEDULE_UTC in public/app.js.
-    # Change the time here: https://crontab.guru/#5_0_*_*_*
+    # All cron times are UTC. Pakistan (PKT) is UTC+5 with no daylight saving: subtract 5 hours.
+    # If you change these, also update SCHEDULE_UTC in public/app.js (and the LIVE_CRON check below).
+    # Daily snapshot + live refresh: 00:05 UTC = 5:05 AM PKT.
     - cron: "5 0 * * *"
-  workflow_dispatch: {} # "Run workflow" button in the Actions tab
+    # Live refresh only, every 4 hours: 9:05 AM, 1:05 PM, 5:05 PM, 9:05 PM, 1:05 AM PKT.
+    - cron: "5 4,8,12,16,20 * * *"
+  workflow_dispatch: {} # "Run workflow" button in the Actions tab: runs daily + live
   push:
     branches: [main]
-    paths-ignore: ["public/data/**", "README.md"]
+    paths-ignore: ["public/data/**", "README.md", "HANDOVER.md"]
 
 permissions:
-  contents: write # commit the new day's data
+  contents: write # commit daily data to main, save live snapshots to the live-data branch
   pages: write
   id-token: write
 
@@ -20,10 +22,13 @@ concurrency:
   group: daily-update
   cancel-in-progress: false
 
+env:
+  LIVE_CRON: "5 4,8,12,16,20 * * *"
+
 jobs:
   update-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -34,24 +39,51 @@ jobs:
         with:
           node-version: 22
 
-      - name: Fetch today's market data
+      # Live snapshots (last 3 days) live on the "live-data" branch, which is overwritten each
+      # run, so 6 updates a day never bloat the history of main.
+      - name: Restore live snapshots
+        run: |
+          mkdir -p public/data/live
+          if git fetch -q --depth=1 origin live-data; then
+            git archive FETCH_HEAD | tar -x -C public/data/live
+            echo "Restored $(ls public/data/live/history | wc -l) live snapshots."
+          else
+            echo "No live-data branch yet; this will be the first live snapshot."
+          fi
+
+      - name: Fetch market data
         if: github.event_name != 'push'
         env:
           COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
-        run: node scripts/build-data.mjs
+          MODE_FLAGS: ${{ github.event.schedule == env.LIVE_CRON && '--live' || '--daily --live' }}
+        run: node scripts/build-data.mjs $MODE_FLAGS
 
-      - name: Save data to the repository
+      - name: Save daily data to main
         if: github.event_name != 'push'
         run: |
           git config user.name "ascent-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/data
           if git diff --cached --quiet; then
-            echo "No data changes."
+            echo "No daily data changes."
           else
             git commit -m "data: $(date -u +%Y-%m-%d)"
+            git pull --rebase -q origin main
             git push
           fi
+
+      - name: Save live snapshots to the live-data branch
+        if: github.event_name != 'push'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd public/data/live
+          git init -q -b live-data
+          git add -A
+          git -c user.name="ascent-bot" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "live snapshots $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:live-data
+          rm -rf .git
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

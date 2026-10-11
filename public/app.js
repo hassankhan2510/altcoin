@@ -1,4 +1,9 @@
 // Ascent dashboard — static, zero-dependency. Reads data/*.json produced by scripts/build-data.mjs.
+// One script powers both pages, chosen by <body data-mode>: index.html (daily) and live.html (every 4 hours).
+
+const MODE = document.body.dataset.mode === "live" ? "live" : "daily";
+const LIVE = MODE === "live";
+const BASE = LIVE ? "data/live/" : "data/";
 
 const $ = (s, el = document) => el.querySelector(s);
 const PAGE = 50;
@@ -31,8 +36,9 @@ const dirClass = (p) => (p > 0 ? "is-up" : p < 0 ? "is-down" : "");
 const arrow = (p) => (p > 0 ? "▲" : p < 0 ? "▼" : "•");
 // ── Time: every time is shown in Pakistan Standard Time (PKT = UTC+5, no daylight saving) ──
 const TZ = "Asia/Karachi";
-// Keep in sync with the cron line in .github/workflows/daily.yml (00:05 UTC = 5:05 AM PKT).
-const SCHEDULE_UTC = { hour: 0, minute: 5 };
+// Keep in sync with the cron lines in .github/workflows/daily.yml.
+// Daily: 00:05 UTC = 5:05 AM PKT. Live: every 4 hours from 00:05 UTC = 5:05 AM, 9:05 AM, 1:05 PM, 5:05 PM, 9:05 PM, 1:05 AM PKT.
+const SCHEDULE_UTC = { hours: LIVE ? [0, 4, 8, 12, 16, 20] : [0], minute: 5 };
 const fmt = (iso, opts) => new Date(iso).toLocaleString("en-GB", { timeZone: TZ, ...opts });
 const pkTime = (iso) => fmt(iso, { hour: "numeric", minute: "2-digit", hour12: true }).toUpperCase(); // "10:43 AM"
 const pkDay = (iso) => fmt(iso, { weekday: "short", day: "numeric", month: "short" }); // "Sat 10 Oct"
@@ -47,19 +53,24 @@ const localStamp = (iso) => new Date(iso).toLocaleString("en-GB", { weekday: "sh
 
 function ago(iso) {
   const h = (Date.now() - new Date(iso).getTime()) / 36e5;
-  if (h < 1) return `${Math.max(1, Math.round(h * 60))} minutes ago`;
+  if (h < 1) { const m = Math.max(1, Math.round(h * 60)); return `${m} minute${m === 1 ? "" : "s"} ago`; }
   if (h < 48) return `${Math.round(h)} hour${Math.round(h) === 1 ? "" : "s"} ago`;
   return `${Math.round(h / 24)} days ago`;
 }
 
-/** When the next scheduled run should happen, or "late" if today's run is overdue. */
+/** When the next scheduled run should happen, or "late" if the most recent slot's run hasn't arrived. */
 function nextUpdate(generatedAt) {
   const now = new Date();
-  const slot = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), SCHEDULE_UTC.hour, SCHEDULE_UTC.minute));
-  if (now >= slot && new Date(generatedAt) < slot) return { late: true, iso: slot.toISOString() };
-  if (slot <= now) slot.setUTCDate(slot.getUTCDate() + 1);
-  return { late: false, iso: slot.toISOString() };
+  const slots = [];
+  for (let d = -1; d <= 1; d++) {
+    for (const h of SCHEDULE_UTC.hours) slots.push(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + d, h, SCHEDULE_UTC.minute)));
+  }
+  slots.sort((a, b) => a - b);
+  const last = slots.filter((t) => t <= now).at(-1);
+  if (last && new Date(generatedAt) < last) return { late: true, iso: last.toISOString() };
+  return { late: false, iso: slots.find((t) => t > now).toISOString() };
 }
+const hoursBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 36e5);
 
 function logo(c, size = "") {
   return `<img class="logo ${size}" src="${esc(c.image)}" alt="" loading="lazy" decoding="async" width="36" height="36" data-sym="${esc(c.symbol.slice(0, 3))}">`;
@@ -135,15 +146,17 @@ async function load(date) {
   $("#app").classList.add("is-loading");
   try {
     const isLatest = !date || date === state.index?.latest;
-    state.data = await getJSON(isLatest ? "data/latest.json" : `data/history/${date}.json`);
+    state.data = await getJSON(isLatest ? `${BASE}latest.json` : `${BASE}history/${date}.json`);
     state.date = state.data.date;
     state.limit = PAGE;
     state.open.clear();
     render();
   } catch (err) {
     console.error(err);
-    $("#headline").textContent = "We couldn't load today's numbers.";
-    $("#briefing").innerHTML = `<p>The daily update may still be running. Please refresh in a few minutes.</p>`;
+    $("#headline").textContent = LIVE ? "The live numbers aren't ready yet." : "We couldn't load today's numbers.";
+    $("#briefing").innerHTML = LIVE
+      ? `<p>The live page refreshes every 4 hours. Please check back after the next update.</p>`
+      : `<p>The daily update may still be running. Please refresh in a few minutes.</p>`;
   } finally {
     $("#app").classList.remove("is-loading");
     $("#app").setAttribute("aria-busy", "false");
@@ -155,6 +168,7 @@ function render() {
   renderHero();
   renderMood();
   renderPodium();
+  renderMoves();
   renderFilters();
   renderBoard();
 }
@@ -164,29 +178,47 @@ function renderHero() {
   const s = data.summary;
   const top = data.coins.find((c) => c.id === s.topId) ?? data.coins[0];
   const isLatest = data.date === state.index?.latest || !state.index;
-  $("#eyebrowText").textContent = `${pkLong(data.generatedAt)} · ${isLatest ? "Latest briefing" : "Past briefing"}`;
+  $("#eyebrowText").textContent = LIVE
+    ? `${pkLong(data.generatedAt)} · ${isLatest ? "Live, refreshed every 4 hours" : "Past live snapshot"}`
+    : `${pkLong(data.generatedAt)} · ${isLatest ? "Latest briefing" : "Past briefing"}`;
   renderWhen(data.generatedAt, isLatest);
-  document.title = `Ascent — ${top.symbol} ${pct(top.capPct)} · ${pkDay(data.generatedAt)}`;
+  document.title = `Ascent ${LIVE ? "Live" : "Daily"} — ${top.symbol} ${pct(top.capPct)} · ${pkStamp(data.generatedAt)}`;
 
-  $("#headline").innerHTML = top.capPct > 0
-    ? `<img class="logo-inline" src="${esc(top.image)}" alt="">${esc(top.name)} led the climb, <em>up&nbsp;${pct(top.capPct).slice(1)}</em> in a single day.`
-    : `A quiet day. Even the best coin, ${esc(top.name)}, moved only ${pct(top.capPct)}.`;
+  $("#headline").innerHTML = top.capPct <= 0
+    ? `A quiet day. Even the best coin, ${esc(top.name)}, moved only ${pct(top.capPct)}.`
+    : LIVE
+      ? `<img class="logo-inline" src="${esc(top.image)}" alt="">Right now, ${esc(top.name)} leads, <em>up&nbsp;${pct(top.capPct).slice(1)}</em> in 24 hours.`
+      : `<img class="logo-inline" src="${esc(top.image)}" alt="">${esc(top.name)} led the climb, <em>up&nbsp;${pct(top.capPct).slice(1)}</em> in a single day.`;
 
-  const sentences = s.briefing.map((t) => `<p>${esc(t).replace(/(\$[\d.]+[KMB]|[+−-]?[\d.]+%)/g, "<strong>$1</strong>")}</p>`);
+  const lines = [...s.briefing];
+  if (LIVE && data.prevAt) lines.push(sinceSentence(data));
+  const sentences = lines.filter(Boolean).map((t) => `<p>${esc(t).replace(/(\$[\d.]+[KMB]|[+−-]?[\d.]+%)/g, "<strong>$1</strong>")}</p>`);
   $("#briefing").innerHTML = sentences.join("");
 
   const fresh = $("#freshness");
   const pulse = $(".pulse");
   const hours = (Date.now() - new Date(data.generatedAt).getTime()) / 36e5;
-  if (isLatest && hours > 30) {
+  if (isLatest && hours > (LIVE ? 9 : 30)) {
     fresh.hidden = false;
-    fresh.textContent = `Heads up: these numbers are from ${ago(data.generatedAt)}. Today's update hasn't arrived yet.`;
+    fresh.textContent = `Heads up: these numbers are from ${ago(data.generatedAt)}. ${LIVE ? "The latest 4-hour update" : "Today's update"} hasn't arrived yet.`;
     pulse.classList.add("is-stale");
   } else {
     fresh.hidden = true;
     pulse.classList.toggle("is-stale", !isLatest);
   }
   $("#footMeta").textContent = `Updated ${pkStamp(data.generatedAt)} PKT. Coin list from Binance public market data, market caps from CoinGecko.`;
+}
+
+/** Live only: one plain sentence about what moved since the previous 4-hour snapshot. */
+function sinceSentence(data) {
+  const moved = data.coins.filter((c) => c.sinceCapPct != null);
+  if (!moved.length) return "";
+  const fastest = moved.reduce((a, b) => (b.sinceCapPct > a.sinceCapPct ? b : a));
+  const climber = data.coins.filter((c) => c.posMove > 0).sort((a, b) => b.posMove - a.posMove)[0];
+  const h = hoursBetween(data.prevAt, data.generatedAt);
+  let t = `Since the last update ${h} hours ago, ${fastest.name} moved the most (${pct(fastest.sinceCapPct)})`;
+  if (climber && climber.id !== fastest.id) t += `, and ${climber.name} climbed ${climber.posMove} places to #${climber.pos}`;
+  return `${t}.`;
 }
 
 /** The time box under the date: exact window, last update, next update — all in PKT. */
@@ -199,6 +231,7 @@ function renderWhen(gen, isLatest) {
   $("#when").innerHTML = `
     <div><dt>Comparing</dt><dd>${pkStamp(dayBefore(gen))} → ${pkStamp(gen)}</dd></div>
     <div><dt>Updated</dt><dd>${pkStamp(gen)} <span>(${ago(gen)})</span></dd></div>
+    ${LIVE && state.data.prevAt ? `<div><dt>Since last update</dt><dd>${pkDay(state.data.prevAt) === pkDay(gen) ? `${pkTime(state.data.prevAt)} → ${pkTime(gen)}` : `${pkStamp(state.data.prevAt)} → ${pkStamp(gen)}`} <span>(${hoursBetween(state.data.prevAt, gen)} hours)</span></dd></div>` : ""}
     ${isLatest ? `<div><dt>Next update</dt><dd>${nextText}</dd></div>` : ""}
     <p class="when__tz">All times are <strong>Pakistan Standard Time (PKT, UTC+5)</strong>.${yours}</p>`;
 }
@@ -256,6 +289,34 @@ function renderPodium() {
     </article>`).join("");
 }
 
+/** Live only: who moved most since the previous 4-hour snapshot. */
+function renderMoves() {
+  const el = $("#moves");
+  if (!el) return;
+  const d = state.data;
+  if (!d.prevAt) {
+    el.innerHTML = `<div class="card empty">This is the first live snapshot. Changes since the last update appear after the next refresh.</div>`;
+    return;
+  }
+  const moved = d.coins.filter((c) => c.sinceCapPct != null);
+  const rising = moved.filter((c) => c.sinceCapPct > 0).sort((a, b) => b.sinceCapPct - a.sinceCapPct).slice(0, 5);
+  const falling = moved.filter((c) => c.sinceCapPct < 0).sort((a, b) => a.sinceCapPct - b.sinceCapPct).slice(0, 5);
+  const climbers = d.coins.filter((c) => c.posMove > 0).sort((a, b) => b.posMove - a.posMove).slice(0, 5);
+  const fresh = d.coins.filter((c) => c.posPrev == null);
+  const since = `since ${pkDay(d.prevAt) === pkDay(d.generatedAt) ? pkTime(d.prevAt) : pkStamp(d.prevAt)} PKT`;
+  const card = (title, sub, items, val) => `
+    <article class="moves__card card">
+      <h3>${title}</h3>
+      <p class="muted">${sub}</p>
+      <ol>${items.map((c) => `<li>${logo(c, "logo--sm")}<span class="moves__name"><strong>${esc(c.name)}</strong><small>${esc(c.symbol)} · now #${c.pos}</small></span>${val(c)}</li>`).join("") || `<li class="muted">Nothing to show</li>`}</ol>
+    </article>`;
+  el.innerHTML =
+    card("Rising fastest", `Value change ${since}`, rising, (c) => `<b class="is-up">${arrow(c.sinceCapPct)} ${pct(c.sinceCapPct)}</b>`) +
+    card("Falling fastest", `Value change ${since}`, falling, (c) => `<b class="is-down">${arrow(c.sinceCapPct)} ${pct(c.sinceCapPct)}</b>`) +
+    card("Climbing the ranking", `Places gained ${since}`, climbers, (c) => `<b class="is-up">▲ ${c.posMove}</b>`) +
+    (fresh.length ? `<p class="moves__new"><b>New to the list</b> since the last update: ${fresh.map((c) => esc(c.name)).join(", ")}</p>` : "");
+}
+
 function counts() {
   const all = state.data.coins;
   const by = (t) => all.filter((c) => c.tier === t).length;
@@ -294,6 +355,7 @@ function filtered() {
     "pct-asc": (a, b) => a.capPct - b.capPct,
     delta: (a, b) => b.capDelta - a.capDelta,
     cap: (a, b) => b.cap - a.cap,
+    since: (a, b) => (b.sinceCapPct ?? -Infinity) - (a.sinceCapPct ?? -Infinity),
   };
   return list.sort(sorters[state.sort]);
 }
@@ -310,22 +372,32 @@ function rowHTML(c, scale) {
   const fill = c.capPct === 0 ? "" : `<span class="dbar__fill dbar__fill--${c.capPct > 0 ? "up" : "down"}${clipped ? " is-clipped" : ""}" style="width:calc(${w}% - 1px)"></span>`;
   const open = state.open.has(c.id);
   const verb = c.capPct >= 0 ? "more" : "less";
+  const d = state.data;
+  const hasSince = LIVE && d.prevAt && c.sinceCapPct != null;
+  const sinceH = hasSince ? hoursBetween(d.prevAt, d.generatedAt) : 0;
+  const move = !LIVE || !d.prevAt ? ""
+    : c.posPrev == null ? `<small class="mv mv--new" data-tip="New to the list since the last update">New</small>`
+    : c.posMove > 0 ? `<small class="mv is-up" data-tip="Up ${c.posMove} places since the last update">▲${c.posMove}</small>`
+    : c.posMove < 0 ? `<small class="mv is-down" data-tip="Down ${-c.posMove} places since the last update">▼${-c.posMove}</small>`
+    : "";
+  const sinceLine = !hasSince ? ""
+    : ` Since the last update (<strong>${pkStamp(d.prevAt)}</strong>), its value moved <strong class="${dirClass(c.sinceCapPct)}">${pct(c.sinceCapPct)}</strong>${c.posMove > 0 ? ` and it climbed <strong>${c.posMove} places</strong>` : c.posMove < 0 ? ` and it dropped <strong>${-c.posMove} places</strong>` : " and it kept its place"} in the ranking.`;
   const priceLine = c.pricePct == null ? "" : ` The price of one coin moved <strong>${pct(c.pricePct)}</strong>.`;
   const supplyLine = !c.supplyDriven ? ""
     : c.supplyGap > 0 ? ` <strong>Note:</strong> the total value grew faster than the price, which usually means new coins were released into circulation (for example a scheduled unlock).`
     : ` <strong>Note:</strong> the total value grew slower than the price, which usually means coins were removed from circulation or the supply figure was corrected.`;
   return `<div class="item${open ? " is-open" : ""}" role="row" data-id="${esc(c.id)}">
     <button class="row" type="button" aria-expanded="${open}" aria-controls="d-${esc(c.id)}">
-      <span class="c-pos" role="cell">${c.pos}</span>
+      <span class="c-pos" role="cell">${c.pos}${move}</span>
       <span class="c-coin" role="cell">${logo(c, "logo--sm")}<span class="c-coin__txt"><strong>${esc(c.name)}</strong><span>${esc(c.symbol)} · ${TIERS[c.tier].label}${c.supplyDriven ? `<span class="badge badge--supply">New supply</span>` : ""}</span></span></span>
       <span class="c-val" role="cell">${usd(c.capPrev)}<span class="arrow">→</span><b>${usd(c.cap)}</b></span>
-      <span class="c-chg ${dirClass(c.capPct)}" role="cell"><b>${arrow(c.capPct)} ${pct(c.capPct)}</b><small>${usd(c.capDelta, { sign: true })}</small></span>
+      <span class="c-chg ${dirClass(c.capPct)}" role="cell"><b>${arrow(c.capPct)} ${pct(c.capPct)}</b><small${hasSince ? ` class="${dirClass(c.sinceCapPct)}" data-tip="Value change in the last ${sinceH} hours"` : ""}>${hasSince ? `${sinceH}h ${pct(c.sinceCapPct)}` : usd(c.capDelta, { sign: true })}</small></span>
       <span class="c-bar" role="cell"><span class="dbar" data-tip="<b>${pct(c.capPct)}</b> · ${usd(c.capDelta, { sign: true })} in 24h">${fill}</span></span>
       <span class="c-spark" role="cell">${spark(c.spark, (c.spark.at(-1) ?? 0) >= (c.spark[0] ?? 0))}</span>
       <span class="c-price" role="cell">${price(c.price)}<small class="${dirClass(c.pricePct)}">${pct(c.pricePct)}</small></span>
     </button>
     <div class="detail" id="d-${esc(c.id)}">
-      <p>On <strong>${pkStamp(dayBefore(state.data.generatedAt))}</strong> (PKT), all the ${esc(c.symbol)} coins in circulation were worth <strong>${usd(c.capPrev)}</strong> together. 24 hours later, on <strong>${pkStamp(state.data.generatedAt)}</strong>, they were worth <strong>${usd(c.cap)}</strong>. That's <strong>${usd(Math.abs(c.capDelta))} ${verb}</strong>, a change of <strong class="${dirClass(c.capPct)}">${pct(c.capPct)}</strong>.${priceLine}${supplyLine}</p>
+      <p>On <strong>${pkStamp(dayBefore(state.data.generatedAt))}</strong> (PKT), all the ${esc(c.symbol)} coins in circulation were worth <strong>${usd(c.capPrev)}</strong> together. 24 hours later, on <strong>${pkStamp(state.data.generatedAt)}</strong>, they were worth <strong>${usd(c.cap)}</strong>. That's <strong>${usd(Math.abs(c.capDelta))} ${verb}</strong>, a change of <strong class="${dirClass(c.capPct)}">${pct(c.capPct)}</strong>.${sinceLine}${priceLine}${supplyLine}</p>
       <div class="detail__facts">
         <span>Price <b>${price(c.price)}</b></span>
         <span>Price over 7 days <b class="${dirClass(c.price7dPct)}">${pct(c.price7dPct)}</b></span>
@@ -408,7 +480,7 @@ $("#themeBtn").addEventListener("click", () => {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 (async function boot() {
   try {
-    state.index = await getJSON("data/index.json");
+    state.index = await getJSON(`${BASE}index.json`);
   } catch {
     state.index = null;
   }

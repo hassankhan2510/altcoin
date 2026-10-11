@@ -18,7 +18,7 @@
     try { const t = localStorage.getItem("ascent-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
   </script>
 </head>
-<body>
+<body data-mode="daily">
   <a class="skip" href="#board">Skip to the full list</a>
 
   <header class="top">
@@ -30,8 +30,11 @@
           <rect x="23" y="4" width="6" height="25" rx="1.5" />
         </svg>
         <span class="brand__name">Ascent</span>
-        <span class="brand__tag">Daily market-cap climbers</span>
       </a>
+      <nav class="nav" aria-label="Pages">
+        <a href="./" aria-current="page">Daily</a>
+        <a href="live.html"><span class="nav__dot" aria-hidden="true"></span>Live</a>
+      </nav>
       <div class="top__tools">
         <label class="datepick">
           <span class="sr">Choose a day</span>
